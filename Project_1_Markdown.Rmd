@@ -1,0 +1,306 @@
+---
+title: "Individual Project 1"
+author: "Ted Inciong"
+date: "1/25/2017"
+output: html_document
+#output: word_document
+---
+
+*Instructor Name: Dr. Nathan Bastian (Prof. B)
+*Program Name: Master of Science in Predictive Analytics (MSPA) 
+*Course Name: Practical Machine Learning
+*Course Number: PREDICT 422-DL
+
+PROJECT DESCRIPTION
+In this individual project, you will use the diabetes data in Efron et al. (2003) to examine the effects of ten baseline predictor variables [age, sex, body mass index (bmi), average blood pressure (map), and six blood serum measurements (tc, ldl, hdl, tch, ltg, glu)] on a quantitative measure of disease progression one year after baseline. There are 442 diabetes patients in this data set. The data are available in the R package “lars.” You must employ several machine learning techniques using the diabetes data to fit linear regression, ridge regression and lasso models. You must also incorporate best subset selection and cross- validation techniques.
+
+PROJECT REQUIREMENTS:
+Fit the following models to the training set. For each model: 
+(i)extract the model coefficient estimates from training set (not from re-running on the full data set), 
+(ii)predict the responses for the test set and 
+(iii) calculate the “mean prediction error” (i.e., MSE) and its standard error in the test set.
+```{r}
+library(lars)
+data(diabetes)
+data.all <- data.frame(cbind(diabetes$x, y = diabetes$y)) 
+#data.all$sex_type[1:11]
+```
+Partition the patients into two groups: training (75%) and test (25%)
+```{r}
+n <- dim(data.all)[1]       # sample size = 442 
+set.seed(1306)        # set random number generator seed to enable repeatability of results
+test <- sample(n, round(n/4)) # randomly sample 25% test
+data.train <- data.all[-test,]
+data.test <- data.all[test,]
+x <- model.matrix(y ~ ., data = data.all)[,-1] # define predictor matrix
+x.train <- x[-test,]  # excl intercept col of 1s
+x.test <- x[test,] # define test predictor matrix
+y <- data.all$y # define response variable
+y.train <- y[-test] # define training response variable
+y.test <- y[test] # define test response variable
+n.train <- dim(data.train)[1] # training sample size = 332
+n.test <- dim(data.test)[1] # test sample size = 110
+
+```
+Exploratory Data Analysis (EDA) - Check Dimensions
+```{r}
+dim(data.all) 
+dim(data.train)
+dim(data.test)
+head(data.all)
+pairs(data.train)
+cor(subset(data.train))
+
+```
+EDA - Check for Missing Values
+```{r}
+sum(is.na(data.all))
+
+pairs(data.train)
+cor(subset(data.train))
+
+```
+```
+1. LM Least squares regression model using all ten predictors (R function lm).
+
+```{r}
+lm.fit=lm(y~.,data.train)
+
+```
+#Least Squares
+(i) Coefficients for Training Set
+```{r}
+summary(lm.fit)
+lm.fit.coef = coef(lm.fit)
+lm.fit.coef
+```
+
+```{r}
+summary(lm.fit)
+#par(mfrow=c(2,2))
+plot(lm.fit)
+```
+```{r}
+```
+(ii) LM Predict Responses for Test Set
+```{r}
+lm.fit.predict=predict(lm.fit,data.test)
+lm.fit.predict
+```
+(iiia) - LM Test MSE
+```{r}
+lm.fit.mse=mean((lm.fit.predict-y.test)^2)
+lm.fit.mse
+```
+(iiib) - LM Standard error
+```{r}
+lm.fit.sd=sd((lm.fit.predict-y.test)^2)/sqrt(n.test)  
+lm.fit.sd
+library(car)
+vif(lm.fit)
+
+```
+
+
+2. Apply best subset selection using BIC to select the number of predictors (R function regsubsets in
+package leaps).
+
+```{r}
+#install.packages("leaps")
+library(leaps)
+set.seed(1)
+regfit.best=regsubsets(y~.,data.train,nvmax=10)
+summary(regfit.best)
+
+regfit.best.summary=summary(regfit.best) 
+names(regfit.best.summary)
+```
+Use BIC to select the number of predictors - Low value of BIC indicates low error, and thus 
+a better model
+```{r}
+regfit.best.summary$bic
+
+```
+```{r}
+plot(regfit.best.summary$bic, xlab="Number of Variables",ylab="BIC",type="l")
+which.min(regfit.best.summary$bic)
+points(6,regfit.best.summary$bic[6], col="red",cex=2,pch=20)
+
+```
+#Best Subset - BIC
+(i) BIC Coefficients for Training Set
+```{r}
+summary(regfit.best,6)
+regfit.best.coef=coef(regfit.best,6)
+regfit.best.coef
+matrix(regfit.best.coef,dimnames=list(c("Intercept","sex","bmi","map","tc","tch","ltg")))
+```
+
+Since there is no predict() for regsubsets() we capture our steps below
+```{r}
+
+predict.regsubsets=function(object,newdata,id,...){
+  form=as.formula(object$call[[2]])
+  mat=model.matrix(form,newdata)
+  coefi=coef(object,id=id)
+  xvars=names(coefi)
+  mat[,xvars]%*%coefi
+}
+```
+(ii) BIC Predict Responses for Test Set
+```{r}
+regfit.best.predict=predict(regfit.best,data.test,id=6)
+regfit.best.predict
+```
+(iiia) BIC Test MSE
+```{r}
+regfit.best.mse=mean((regfit.best.predict-y.test)^2)
+regfit.best.mse
+```
+(iiib) BIC Standard Error
+```{r}
+regfit.best.sd=sd((regfit.best.predict-y.test)^2)/sqrt(n.test)
+regfit.best.sd
+```
+```{r}
+#plot(regfit.best.predict-y.test)
+```
+
+
+3. Apply best subset selection using 10-fold cross-validation to select the number of predictors (R function regsubsets in package leaps). [Use a random number seed of 1306 before entering the
+command: folds <- sample(1:k, nrow(data.train), replace = TRUE).]
+```{r}
+k=10
+set.seed(1306)
+folds=sample(1:k,nrow(data.train),replace=TRUE)
+
+cv.errors=matrix(NA,k,10, dimnames=list(NULL, paste(1:10)))
+for(j in 1:k){
+  best.fit.cv=regsubsets(y~.,data=data.train[folds!=j,],nvmax=10)
+  for(i in 1:10){
+    pred=predict(best.fit.cv,data.train[folds==j,],id=i)
+    cv.errors[j,i]=mean( (data.train$y[folds==j]-pred)^2)
+    }
+  }
+mean.cv.errors=apply(cv.errors,2,mean)
+mean.cv.errors
+par(mfrow=c(1,1))
+plot(mean.cv.errors,type='b')
+which.min(mean.cv.errors)
+points(6, mean.cv.errors[6], pch = 4, col = "red", lwd = 7)
+
+regfit.best.10k=regsubsets(y~.,data=data.train, nvmax=6)
+```
+#10-Fold Cross-Validation
+(i) 10-K Coefficients for Training Set
+
+```{r}
+regfit.best.10k.coef=coef(regfit.best.10k,6)
+
+matrix(regfit.best.10k.coef,dimnames=list(c("Intercept","sex","bmi","map","tc","tch","ltg")))
+```
+(ii) 10-K Predict Responses for Test Set
+```{r}
+regfit.best.10k.predict=predict(regfit.best.10k,data.test,id=6)
+
+regfit.best.10k.predict
+```
+(iiia) 10-K Test MSE
+```{r}
+regfit.best.10k.mse=mean((regfit.best.10k.predict-y.test)^2)
+regfit.best.10k.mse
+```
+(iiia) 10-K Standard Error
+```{r}
+regfit.best.10k.sd=sd((regfit.best.10k.predict-y.test)^2)/sqrt(n.test)
+regfit.best.10k.sd
+```
+4. Ridge regression modeling using 10-fold cross-validation to select the largest value of λ such that the cross-validation error is within 1 standard error of the minimum (R functions glmnet and cv.glmnet in package glmnet). [Use a random number seed of 1306 immediately before entering the command: cv.out <- cv.glmnet(x.train, y.train, alpha = 0).]
+```{r}
+#install.packages("glmnet")
+library(glmnet)
+set.seed(1306)
+cv.out <- cv.glmnet(x.train, y.train, alpha = 0)
+plot(cv.out)
+
+
+bestlam=cv.out$lambda.1se
+bestlam
+
+
+
+```
+#Ridge Regression
+(i) Ridge Regression Coefficients for Training Set
+```{r}
+ridge.mod=glmnet(x.train,y.train,alpha=0,lambda=bestlam)
+coef(ridge.mod)
+```
+(ii) Ridge Regression Predict Responses for Test Set
+```{r}
+ridge.mod.pred=predict(ridge.mod,s=bestlam,newx=x.test)
+ridge.mod.pred
+```
+(iiia) Ridge Regression Test MSE
+```{r}
+ridge.mod.mean=mean((ridge.mod.pred-y.test)^2)
+ridge.mod.mean
+```
+(iiib) Ridge Regression Standard Error
+```{r}
+ridge.mod.sd=sd((ridge.mod.pred-y.test)^2)/sqrt(n.test)
+ridge.mod.sd
+```
+5. Lasso model using 10-fold cross-validation to select the largest value of λ such that the cross- validation error is within 1 standard error of the minimum (R functions glmnet and cv.glmnet in package glmnet). [Use a random number seed of 1306 immediately before entering the command: cv.out <- cv.glmnet(x.train, y.train, alpha = 1).]
+```{r}
+set.seed(1306)
+cv.out.lasso <- cv.glmnet(x.train, y.train, alpha = 1)
+plot(cv.out.lasso)
+bestlam.lasso=cv.out.lasso$lambda.1se
+bestlam.lasso
+
+```
+#Lasso
+(i) Lasso Coefficients for Training Set
+```{r}
+
+lasso.mod=glmnet(x.train,y.train,alpha=1,lambda=bestlam.lasso)
+coef(lasso.mod)
+```
+(ii) Lasso Predict Responses for Test Set
+```{r}
+lasso.mod.pred=predict(lasso.mod,s=bestlam.lasso,newx=x.test)
+lasso.mod.pred
+```
+(iiia) Lasso Test MSE
+```{r}
+lasso.mod.mean=mean((lasso.mod.pred-y.test)^2)
+lasso.mod.mean
+```
+(iiib) Lasso Standard Error
+```{r}
+lasso.mod.sd=sd((lasso.mod.pred-y.test)^2)/sqrt(n.test)
+lasso.mod.sd
+```
+First attempt at plotting tuning parameter by coefficients for lasso
+lbs_fun <- function(fit, ...) {
+  L <- length(fit$lambda)
+  x <- log(fit$lambda[L])
+  y <- fit$beta[, L]
+  labs <- names(y)
+  text(x, y, labels=labs, ...)
+}
+
+plot(cv.out.lasso$glmnet.fit,xvar = "lambda", label = TRUE,main="Lasso Coefficients by Log Lambda")
+lbs_fun(cv.out.lasso$glmnet.fit)
+
+```{r more_graphs}
+#install.packages("plotmo")
+library(plotmo)
+plot_glmnet(cv.out.lasso$glmnet.fit,label=TRUE,s=bestlam.lasso)
+
+```
+
+```{r rr_plot}
+plot_glmnet(cv.out$glmnet.fit,label=TRUE,s=bestlam)
+```
